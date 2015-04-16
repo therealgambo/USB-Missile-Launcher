@@ -90,3 +90,24 @@ Installation
       	* "R" - Right
       	* "F" - Fire
       	* "S" - Stop
+
+=================
+Additional Tools
+=================
+
+To help debug and test network services locally, you can use 'sendip' to 
+simulate network packets.
+
+   1. Install sendip
+      
+      sudo apt-get install sendip
+      
+   2. Create UDP packet from terminal
+   
+      sudo sendip -p ipv4 -is 127.0.0.1 -p udp -us 20000 -ud 20000 -d "F" -v 127.0.0.1
+      
+   3. Further notes.
+   
+      You will need to run this in a seperate terminal window while the 
+      USBMissileLauncherUtils network service is running. You should see
+      a connection command from 127.0.0.1 if successful.
