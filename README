@@ -15,6 +15,10 @@ Updates/Fork - Added by Kris Gambirazzi
 	
 	Network support added. UDP Port: 20000
 		- Accepts UTF8 string commands (U,D,L,R,F,S)
+		
+** Please note this has been stripped back to minimal functionality.
+   Support for USB Circus Cannon has been removed as well as some command line functions.
+   
 
 ===========
 Description
@@ -72,7 +76,17 @@ Installation
       however stops after 100ms and then finally moves simutaniously
       right, up and fires a missile.
    
-8. Control the USB Missile Launcher from the keyboard located at
-   /dev/input/event0:
+8. Control the USB Missile Launcher via network services (UDP 20000)
 
-      sudo ./USBMissileLauncherUtils -c /dev/input/event0
+      ./USBMissileLauncherUtils -n
+
+      This will setup a listening UDP service on port 20000 awaiting 
+      control commands from any connection. Accepted command strings
+      are as follows:
+      
+      	* "U" - Up
+      	* "D" - Down
+      	* "L" - Left
+      	* "R" - Right
+      	* "F" - Fire
+      	* "S" - Stop
