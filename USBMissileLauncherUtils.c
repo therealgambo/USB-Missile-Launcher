@@ -38,6 +38,7 @@
 #include<arpa/inet.h>
 #include<sys/socket.h>
 #include<ctype.h>
+#include<pthread.h> //for threading , link with lpthread
 #endif
 #include "InputEvent.h"
 #include "USBMissileLauncher.h"
@@ -91,20 +92,20 @@ void UDPServer(){
    char *stop = "S";
    char msg = 0x00;
 
-   sockfd=socket(AF_INET,SOCK_DGRAM,0);
+   sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
-   bzero(&servaddr,sizeof(servaddr));
+   bzero(&servaddr, sizeof(servaddr));
    servaddr.sin_family = AF_INET;
-   servaddr.sin_addr.s_addr=htonl(INADDR_ANY);
-   servaddr.sin_port=htons(20000);
-   bind(sockfd,(struct sockaddr *)&servaddr,sizeof(servaddr));
+   servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+   servaddr.sin_port = htons(20000);
+   bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr));
    
    fprintf(stderr, "Waiting for connections.... (%s:%d)\n", inet_ntoa(servaddr.sin_addr), ntohs(servaddr.sin_port));
    
    for (;;)
    {
       len = sizeof(cliaddr);
-      recvfrom(sockfd,buf,512,0,(struct sockaddr *)&cliaddr,&len);
+      recvfrom(sockfd,buf,512,0,(struct sockaddr *)&cliaddr, &len);
 
 	  fprintf(stderr, "Received command %s from %s\n", buf, inet_ntoa(cliaddr.sin_addr));         
 		
@@ -130,9 +131,158 @@ void UDPServer(){
 		missile_do(control, msg, device_type);
 		usleep(300 * 1000);
 		missile_do(control, MISSILE_LAUNCHER_CMD_STOP, device_type);
+    msg = 0x00;
    }
 
 	close(sockfd);
+}
+
+//=============================================================================
+
+//the thread function
+void *connection_handler(void *);
+
+int TCPServer(){
+  int socket_desc , client_sock , c , *new_sock;
+  struct sockaddr_in server , client;
+   
+  //Create socket
+  socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+  if (socket_desc == -1)
+  {
+      printf("Could not create socket");
+  }
+  puts("Socket Created.");
+   
+  //Prepare the sockaddr_in structure
+  server.sin_family = AF_INET;
+  server.sin_addr.s_addr = INADDR_ANY;
+  server.sin_port = htons( PORT );
+   
+  //Bind
+  if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
+  {
+      //print the error message
+      perror("bind failed. Error");
+      return 1;
+  }
+   
+  //Listen
+  listen(socket_desc , 3);
+   
+  //Accept and incoming connection
+  //printf("Waiting for incoming connections... (%s:%d)\n", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
+  printf("Waiting for incoming connections on port: %d\n", ntohs(server.sin_port));
+  c = sizeof(struct sockaddr_in);
+
+  while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
+  {
+      printf("Client Connected: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+       
+      pthread_t sniffer_thread;
+      new_sock = malloc(1);
+      *new_sock = client_sock;
+       
+      if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
+      {
+          perror("Error, could not create thread");
+          return 1;
+      }
+       
+      //Now join the thread , so that we dont terminate before the thread
+      //pthread_join( sniffer_thread , NULL);
+      //puts("Handler assigned");
+  }
+   
+  if (client_sock < 0)
+  {
+      perror("accept failed");
+      return 1;
+  }
+   
+  return 0;
+}
+
+void *connection_handler(void *socket_desc)
+{
+  //Get the socket descriptor
+  int sock = *(int*)socket_desc;
+  int read_size;
+  char *message , *reply_message, client_message[512];
+
+  char *up = "U";
+  char *down = "D";
+  char *left = "L";
+  char *right = "R";
+  char *fire = "F";
+  char *stop = "!STOP!";
+  char *quit = "!QUIT!";
+  char msg = 0x00;
+  int device_type = 1;
+   
+  //Send some messages to the client
+  message = "@LOCK@";
+  (void)write(sock, message, strlen(message));
+   
+  //Receive a message from client
+  while( (read_size = recv(sock , client_message , 512 , 0)) > 0 )
+  {
+    //Send the message back to client
+    reply_message = "\n\r";
+    (void)write(sock, reply_message, strlen(reply_message));
+    
+    //puts(stderr, "Received command %s from %s\n", buf, inet_ntoa(cliaddr.sin_addr));  
+    printf("Received command %s\n", client_message);     
+    
+    if (strncmp(client_message,left,strlen(left)) == 0){
+      msg = MISSILE_LAUNCHER_CMD_LEFT;
+    
+    }else if (strncmp(client_message, right, strlen(right)) == 0){
+      msg = MISSILE_LAUNCHER_CMD_RIGHT;
+    
+    }else if (strncmp(client_message, up, strlen(up)) == 0){
+      msg = MISSILE_LAUNCHER_CMD_UP;
+    
+    }else if (strncmp(client_message, down, strlen(down)) == 0){
+      msg = MISSILE_LAUNCHER_CMD_DOWN;
+    
+    }else if (strncmp(client_message, fire, strlen(fire)) == 0){
+      msg = MISSILE_LAUNCHER_CMD_FIRE;
+      
+    }else if (strncmp(client_message, stop, strlen(stop)) == 0){
+      msg = MISSILE_LAUNCHER_CMD_STOP;
+
+    }else if (strncmp(client_message, quit, strlen(quit)) == 0){
+      reply_message = "@TIMESUP@";
+      (void)write(sock, reply_message, strlen(reply_message));
+      read_size = 0;
+      break;
+    }
+
+    
+    missile_do(control, msg, device_type);
+    usleep(300 * 1000);
+    missile_do(control, MISSILE_LAUNCHER_CMD_STOP, device_type);
+
+    msg = 0x00;
+    memset(client_message, 0, sizeof(client_message));
+  }
+   
+  if(read_size == 0)
+  {
+      puts("Client disconnected.");
+      fflush(stdout);
+  }
+  else if(read_size == -1)
+  {
+      perror("Error, recv failed!");
+  }
+       
+  //Free the socket pointer
+  close(sock);
+  free(socket_desc);
+   
+  return 0;
 }
 
 //=============================================================================
@@ -251,7 +401,8 @@ int main(int argc, char **argv) {
   }
   
   if(set_net){
-	UDPServer();
+	//UDPServer();
+  TCPServer();
   }
   
 

@@ -25,7 +25,7 @@
 #   $Id$
 #
 
-LDFLAGS = -lusb
+LDFLAGS = -pthread -lusb
 
 CFLAGS = -c -O2 -Wall
 
