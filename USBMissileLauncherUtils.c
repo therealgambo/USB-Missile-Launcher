@@ -140,10 +140,17 @@ void UDPServer(){
 //=============================================================================
 
 //the thread function
+
+
+typedef struct myStruct {
+  int socket;
+  char *ip;
+} myStruct;
+
 void *connection_handler(void *);
 
 int TCPServer(){
-  int socket_desc , client_sock , c , *new_sock;
+  int socket_desc , client_sock , c;
   struct sockaddr_in server , client;
    
   //Create socket
@@ -151,15 +158,21 @@ int TCPServer(){
 
   if (socket_desc == -1)
   {
-    printf("Error, Could not create the socket.");
+    printf("Error, Could not create the socket.\n\r");
   }
 
-  printf("Socket Created.");
+  printf("Socket Created.\n\r");
    
   //Prepare the sockaddr_in structure
   server.sin_family = AF_INET;
   server.sin_addr.s_addr = INADDR_ANY;
   server.sin_port = htons( PORT );
+
+  int yes = 1;
+  if ( setsockopt(socket_desc, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+      perror("setsockopt");
+      exit(1);
+  }
    
   //Bind
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
@@ -180,12 +193,14 @@ int TCPServer(){
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
   {
     printf("Client Connected: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
-     
+
     pthread_t sniffer_thread;
-    new_sock = malloc(1);
-    *new_sock = client_sock;
+    struct myStruct *myArgs;
+    myArgs = malloc(sizeof(struct myStruct));
+    (*myArgs).ip = inet_ntoa(client.sin_addr);
+    (*myArgs).socket = client_sock;
      
-    if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
+    if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) myArgs) < 0)
     {
         perror("Error, could not create thread for client.");
         return 1;
@@ -206,10 +221,11 @@ int TCPServer(){
   return 0;
 }
 
-void *connection_handler(void *socket_desc)
+void *connection_handler(void *argss)
 {
-  //Get the socket descriptor
-  int sock = *(int*)socket_desc;
+  struct myStruct *client = (struct myStruct*)argss;
+
+  int sock = (*client).socket;
   int read_size;
   char *reply_message, client_message[512];
 
@@ -218,8 +234,9 @@ void *connection_handler(void *socket_desc)
   char *left = "L";
   char *right = "R";
   char *fire = "F";
-  char *stop = "!STOP!";
-  char *quit = "!QUIT!";
+  char *stop = "S";
+  char *quit = "Q";
+
   char msg = 0x00;
   int device_type = 1;
 
@@ -227,9 +244,11 @@ void *connection_handler(void *socket_desc)
   {
     //Send the message back to client
     reply_message = "\n\r";
-    (void)write(sock, reply_message, strlen(reply_message));
+    if( write(sock, reply_message, strlen(reply_message)) == -1 ){
+      printf("Error sending message\n");
+    }
 
-    printf("Received command %s\n", client_message);     
+    printf("Received command %s from %s\n", client_message, (*client).ip);     
     
     if (strncmp(client_message,left,strlen(left)) == 0){
       msg = MISSILE_LAUNCHER_CMD_LEFT;
@@ -250,8 +269,8 @@ void *connection_handler(void *socket_desc)
       msg = MISSILE_LAUNCHER_CMD_STOP;
 
     }else if (strncmp(client_message, quit, strlen(quit)) == 0){
-      // Disconnect client.
-      // TODO
+      read_size = 0;
+      break;
     }
 
     
@@ -276,7 +295,7 @@ void *connection_handler(void *socket_desc)
        
   //Free the socket pointer
   close(sock);
-  free(socket_desc);
+  //free((*client).socket);
    
   return 0;
 }
