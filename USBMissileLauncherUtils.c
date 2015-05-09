@@ -35,16 +35,16 @@
 #include <sys/io.h>
 #include <errno.h>
 #include <linux/input.h>
-#include<arpa/inet.h>
-#include<sys/socket.h>
-#include<ctype.h>
-#include<pthread.h> //for threading , link with lpthread
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <ctype.h>
+#include <pthread.h> //for threading , link with lpthread
 #endif
 #include "InputEvent.h"
 #include "USBMissileLauncher.h"
 
 #define USB_TIMEOUT 1000 /* milliseconds */
-#define PORT 20000   //The port on which to listen for incoming data
+#define PORT 50505   //The port on which to listen for incoming data
 
 int debug_level = 0;
 missile_usb *control;
@@ -57,7 +57,7 @@ int HandleKeyboardEvent(struct input_event *ev, int events, int device_type);
 
 void usage(char *filename) {
   fprintf(stderr, "\n"
-      "=================================================================\n"
+    "=================================================================\n"
 	  "=       M&S USB Missile Launcher - Created by Luke Cole         =\n"
 	  "=          Network Support added by Kris Gambirazzi             =\n"
 	  "=================================================================\n"
@@ -65,7 +65,7 @@ void usage(char *filename) {
 
 	  "   Options:\n"
 	  "   -h            Help\n"
-	  "   -n            UDP Server. Port: 20000\n"
+	  "   -n            TCP Server. Port: 50505\n"
 	  "   -F            Fire Missile\n"
 	  "   -L            Rotate Left\n"
 	  "   -R            Rotate Right\n"
@@ -148,11 +148,13 @@ int TCPServer(){
    
   //Create socket
   socket_desc = socket(AF_INET , SOCK_STREAM , 0);
+
   if (socket_desc == -1)
   {
-      printf("Could not create socket");
+    printf("Error, Could not create the socket.");
   }
-  puts("Socket Created.");
+
+  printf("Socket Created.");
    
   //Prepare the sockaddr_in structure
   server.sin_family = AF_INET;
@@ -162,9 +164,9 @@ int TCPServer(){
   //Bind
   if( bind(socket_desc,(struct sockaddr *)&server , sizeof(server)) < 0)
   {
-      //print the error message
-      perror("bind failed. Error");
-      return 1;
+    //print the error message
+    perror("Error, Failed to bind to the specified port.");
+    return 1;
   }
    
   //Listen
@@ -177,27 +179,28 @@ int TCPServer(){
 
   while( (client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t*)&c)) )
   {
-      printf("Client Connected: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
-       
-      pthread_t sniffer_thread;
-      new_sock = malloc(1);
-      *new_sock = client_sock;
-       
-      if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
-      {
-          perror("Error, could not create thread");
-          return 1;
-      }
-       
-      //Now join the thread , so that we dont terminate before the thread
-      //pthread_join( sniffer_thread , NULL);
-      //puts("Handler assigned");
+    printf("Client Connected: %s:%d\n", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+     
+    pthread_t sniffer_thread;
+    new_sock = malloc(1);
+    *new_sock = client_sock;
+     
+    if( pthread_create( &sniffer_thread , NULL ,  connection_handler , (void*) new_sock) < 0)
+    {
+        perror("Error, could not create thread for client.");
+        return 1;
+    }
+     
+    //Now join the thread , so that we dont terminate before the thread
+    //pthread_join( sniffer_thread , NULL);
+    //puts("Handler assigned");
+    fflush(stdout);
   }
    
   if (client_sock < 0)
   {
-      perror("accept failed");
-      return 1;
+    perror("Error, Client accept failed.");
+    return 1;
   }
    
   return 0;
@@ -208,7 +211,7 @@ void *connection_handler(void *socket_desc)
   //Get the socket descriptor
   int sock = *(int*)socket_desc;
   int read_size;
-  char *message , *reply_message, client_message[512];
+  char *reply_message, client_message[512];
 
   char *up = "U";
   char *down = "D";
@@ -219,19 +222,13 @@ void *connection_handler(void *socket_desc)
   char *quit = "!QUIT!";
   char msg = 0x00;
   int device_type = 1;
-   
-  //Send some messages to the client
-  message = "@LOCK@";
-  (void)write(sock, message, strlen(message));
-   
-  //Receive a message from client
+
   while( (read_size = recv(sock , client_message , 512 , 0)) > 0 )
   {
     //Send the message back to client
     reply_message = "\n\r";
     (void)write(sock, reply_message, strlen(reply_message));
-    
-    //puts(stderr, "Received command %s from %s\n", buf, inet_ntoa(cliaddr.sin_addr));  
+
     printf("Received command %s\n", client_message);     
     
     if (strncmp(client_message,left,strlen(left)) == 0){
@@ -253,10 +250,8 @@ void *connection_handler(void *socket_desc)
       msg = MISSILE_LAUNCHER_CMD_STOP;
 
     }else if (strncmp(client_message, quit, strlen(quit)) == 0){
-      reply_message = "@TIMESUP@";
-      (void)write(sock, reply_message, strlen(reply_message));
-      read_size = 0;
-      break;
+      // Disconnect client.
+      // TODO
     }
 
     
@@ -267,15 +262,16 @@ void *connection_handler(void *socket_desc)
     msg = 0x00;
     memset(client_message, 0, sizeof(client_message));
   }
+
    
   if(read_size == 0)
   {
-      puts("Client disconnected.");
-      fflush(stdout);
+    puts("Client disconnected.");
+    fflush(stdout);
   }
   else if(read_size == -1)
   {
-      perror("Error, recv failed!");
+    perror("Error, recv failed!");
   }
        
   //Free the socket pointer
@@ -288,6 +284,7 @@ void *connection_handler(void *socket_desc)
 //=============================================================================
 
 int main(int argc, char **argv) {
+  setbuf(stdout, NULL);
   const char *optstring = "hnFLRUDS:";
 
   int o;
